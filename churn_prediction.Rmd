@@ -1,0 +1,422 @@
+---
+title: "Churn Prediction"
+author: "Ishan Bagadiya"
+date: "May 2, 2015"
+output: html_document
+---
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+Read the File
+```{r}
+library('markdown')
+library('e1071')
+library('kknn')
+library('class')
+library('MASS')
+library('leaps')
+churn<-read.csv("churn.csv")
+```
+
+Selecting the True & False data and analysing it
+
+```{r, echo=FALSE}
+churn<-read.csv("churn.csv")
+
+true<-which(churn$Churn.=="True.")
+false<-which(churn$Churn.=="False.")
+churn.true<-churn[true,]
+churn.false<-churn[false,]
+mean_cust_serv_calls<-mean(churn$CustServ.Calls)
+sd(churn$CustServ.Calls)
+mean_true_cust_serv_calls<-mean(churn.true$CustServ.Calls)
+mean_false_cust_serv_calls<-mean(churn.false$CustServ.Calls)
+
+mean_day_min_t<-mean(churn.true$Day.Mins)
+mean_day_min_f<-mean(churn.false$Day.Mins)
+
+mean_day_eve_min_t<-mean(churn.true$Eve.Mins)
+mean_day_eve_min_f<-mean(churn.false$Eve.Mins)
+
+plot(density(churn.true$CustServ.Calls))
+lines(density(churn.false$CustServ.Calls),col="red")
+
+
+plot(density(churn.false$CustServ.Calls))
+```
+
+Separating the numeric values
+```{r}
+#sapply(churn,is.numeric)
+num_cols<-which(sapply(churn,is.numeric))
+#num_cols
+#churn[num_cols,]
+numeric_df<-churn[,num_cols]
+class(churn$Churn.)
+```
+
+Converting categorical to binary data
+```{r}
+churn$Int.l.Plan<-as.numeric(churn$Int.l.Plan)
+for(i in 1:nrow(churn))
+{
+  if(churn$Int.l.Plan[i]==1)
+  {
+    
+    churn$Int.l.Plan[i]<-0
+  }
+  else
+  {
+    churn$Int.l.Plan[i]<-1
+    
+  }
+  
+}
+
+churn$VMail.Plan<-as.numeric(churn$VMail.Plan)
+for(i in 1:nrow(churn))
+{
+  if(churn$VMail.Plan[i]==1)
+  {
+    
+    churn$VMail.Plan[i]<-0
+  }
+  else
+  {
+    churn$VMail.Plan[i]<-1
+    
+  }
+  
+}
+
+churn$Churn.<-as.numeric(churn$Churn.)
+for(i in 1:nrow(churn))
+{
+  if(churn$Churn.[i]==1)
+  {
+    
+    churn$Churn.[i]<-0
+  }
+  else
+  {
+    churn$Churn.[i]<-1
+    
+  }
+  
+}
+```
+
+Data Preparation 
+Creating the data frame for analysis
+```{r}
+churn_intl<-churn$Int.l.Plan
+churn_vmail<-churn$VMail.Plan
+churn_output<-churn$Churn.
+numeric_df<-cbind(numeric_df,churn_intl,churn_vmail,churn_output)
+
+```
+
+Principal Component Analysis
+
+```{r}
+#sapply(churn,is.numeric)
+#num_cols1<-which(sapply(churn,is.numeric))
+#num_cols1
+#churn[num_cols,]
+#numeric_df.true<-churn.true[,num_cols1]
+
+obj<-prcomp(numeric_df, retx = TRUE, center = TRUE, scale = FALSE)#PCA Model
+
+# First two Principal components
+obj$rotation[,1:2]
+```
+
+
+
+Cross Validation On the data for classification
+
+```{r}
+#Cross Validation
+
+do_cv_class<-function(df,num_folds,model_name)
+{
+  nf<-ncol(df)
+  
+  
+  
+  df<-na.omit(df)
+  df<-df[sample(nrow(df)),]  #sampling the data
+  n<-nrow(df)
+  x<-floor(n/num_folds)
+  my_data<-data.frame()
+  
+  for(i in 0:(num_folds-1))
+  {
+    begin<- ((x*i)+1)
+    
+    if(i==num_folds-1){
+      end<-nrow(df)
+    }
+    else{
+      end<-(x*(i+1))
+    }
+    index<-c(begin:end)
+    
+    test<-df[index,]
+    
+    train<-df[-index,]
+    if(model_name=="logreg")
+    { 
+      my_output<-get_pred_logreg(train,test)  #gettig the o/p from "logreg" function
+      my_data<-rbind(my_data,my_output)       #storing the o/p in data frame
+    }
+    else if(model_name=="svm")
+    {
+      
+      my_output<-get_pred_svm(train,test) #gettig the o/p from "svm" function
+      my_data<-rbind(my_data,my_output)
+    }
+    else if(model_name=="nb")
+    {
+      my_output<-get_pred_nb(train,test)  #gettig the o/p from "nb" function
+      my_data<-rbind(my_data,my_output)
+    }
+    else if(model_name=="defclas")       ##gettig the o/p from "default" function
+    {
+      my_output<-get_classi_default(train,test)
+      my_data<-rbind(my_data,my_output)
+    }
+    else if(model_name=="defclas")      ##default classifier
+    {
+      my_output<-get_pred_nb(train,test)
+      my_data<-rbind(my_data,my_output)
+    }
+    else 
+    {
+      k<-strsplit(model_name,"n")    #extracting the number from "knn"
+      k<-unlist(k)
+      k<-as.numeric(k[1])
+      my_output<-get_pred_knn(train,test,k)
+      my_data<-rbind(my_data,my_output)
+      
+    }
+  }
+  return(my_data)
+} 
+```
+
+Logistic Regression
+```{r}
+
+get_pred_logreg <- function(train,test){
+  
+  nf<-ncol(train)
+  strfunc<-paste(names(train)[nf],"~.",sep="") # we assume the label to be in the last column
+  func<- as.formula(strfunc)   #creating a formula
+  my.model <- glm(func,data=train,family=binomial) # creating model using glm
+  
+  for(i in 1:nf){
+    predlog<-predict(my.model,test[-nf],type="response") # predicting the outcome
+  }
+  myframe<-cbind(predlog,test[,nf])  #data frame of predicted values and actual o/p 
+  myframe<-as.data.frame(myframe)
+  
+  return(myframe) 
+}
+```
+
+SVM Classifier
+
+```{r}
+get_pred_svm<-function(train,test)
+{
+  train$churn_output=as.factor(train$churn_output)
+  #print(train)
+  nf<-ncol(train)
+  strfunc<-paste(names(train)[nf],"~.",sep="") # we assume the label to be in the last column
+  func<- as.formula(strfunc) 
+  my.model<-svm(func,data=train,probability=TRUE)
+  #print(my.model)
+  #my.model<-svm(train[nf]~.,data=train,probability=TRUE)
+  predsvm<-attr(predict(my.model,test[,-nf],probability = TRUE),'probabilities')[,'1']  
+  #print(predsvm)
+  myframe<-cbind(predsvm,test[,nf])
+  myframe<-as.data.frame(myframe)
+  return(myframe)
+  
+}
+```
+
+Knn Classifier
+
+```{r}
+get_pred_knn<-function(train,test,k)
+{
+  nf<-ncol(train)
+  my.model <- knn(train[,-nf],test[,-nf],train[,nf],k=k,prob=TRUE)
+  prob <- attr(my.model,"prob")  # extract probability
+  # get the raw probability 
+  # note the probability output by k-NN is the proportion of the votes 
+  # for the *winning* class, so we need to retrieve raw probability this way
+  pred.bi <- my.model
+  #pred.bi
+  predknn <- ifelse(pred.bi=='1',prob,1-prob)
+  myframe<-cbind(predknn,test[,nf])
+  myframe<-as.data.frame(myframe)
+  return(myframe)
+}
+
+
+```
+
+Naive Bayes
+```{r}
+get_pred_nb<-function(train,test)
+{
+  
+  nf<-ncol(train)
+  strfunc<-paste(names(train)[nf],"~.",sep="") # we assume the label to be in the last column
+  func<- as.formula(strfunc)
+  my.model <- naiveBayes(func,data=train)
+  prednaive<-predict(my.model,test[,-nf],type='raw')
+  myframe<-cbind(prednaive[,2],test[,nf])
+  myframe<-as.data.frame(myframe)
+  return(myframe)
+  
+}
+```
+
+```{r}
+result<-do_cv_class(numeric_df,10,"logreg")
+
+ans_svm<-do_cv_class(numeric_df,10,"svm")
+
+
+ans_nb<-do_cv_class(numeric_df,10,"nb")
+
+
+```
+
+#Threshold & Accuracy Function
+
+```{r}
+
+
+get_metrics<-function(df,cutoff=0.5)
+{
+  count_t_pos<-0   #true positive
+  count_f_pos<-0  #false positive
+  count_t_neg<-0   #True Negative
+  count_f_neg<-0   #False Negative
+  
+  #Check the threshold
+  for(i in 1:nrow(df))
+  {
+    if(df[i,1]>=cutoff)
+    {
+      df[i,1]<-1
+    }
+    else
+    {
+      df[i,1]<-0
+    }
+    if(df[i,1]==df[i,2] && df[i,1]==1)
+    {
+      count_t_pos<-count_t_pos+1
+    }
+    if(df[i,1]==1 && df[i,1]!=df[i,2])
+    {
+      count_f_pos<-count_f_pos+1
+    }
+    if(df[i,1]==df[i,2] && df[i,1]==0)
+    {
+      count_t_neg<-count_t_neg+1
+    }
+    if(df[i,1]!=df[i,2] && df[i,1]==0)
+    {
+      count_f_neg<-count_f_neg+1
+    }
+    
+  }
+  total_positive<-sum(df[,2]==1)
+  total_negative<-sum(df[,2]==0)
+  tpr<-count_t_pos/total_positive
+  fpr<-count_f_pos/total_negative
+  accuracy<-(count_t_pos+count_t_neg)/nrow(df)
+  precision<-count_t_pos/sum(df[,1]==1)
+  recall<-count_t_pos/(count_t_pos+count_f_neg)
+  output_df<-cbind(tpr,fpr,accuracy,precision,recall) # a dataframe containing all parameters
+  output_df<-as.data.frame(output_df)
+  return(output_df)
+  
+}
+```
+
+```{r}
+accuracy_frame<-get_metrics(result,0.5)
+
+accuracy_svm<-get_metrics(ans_svm,0.5)
+
+
+accuracy_nb<-get_metrics(ans_nb,0.5)
+
+```
+
+```{r}
+accuracy_nb
+
+accuracy_svm
+```
+
+Churn Rate Based On States
+
+```{r}
+library('plyr')
+library(ggplot2)
+library(maps)
+#load us map data
+all_states <- map_data("state")
+#plot all states with ggplot
+p <- ggplot()
+p <- p + geom_polygon( data=all_states, aes(x=long, y=lat, group = group),colour="white", fill="grey10" )
+
+
+library('mapproj')
+
+map<-read.csv('state_churn1.csv')
+merge_map<-merge(all_states,map,by.x="region",by.y="State",all.x=TRUE)
+
+map.plot = ggplot(data = merge_map, mapping = aes(x = long, y = lat, group = group,fill= Churned ),fill="red") + 
+geom_polygon(colour="cyan")  + coord_map()+labs(x = '', y = '', fill = 'Churned',color='red',size=15)
+
+map.plot
+
+```
+
+
+```{r}
+cluster_data<-kmeans(numeric_df,3)
+cluster_no<-cluster_data$cluster
+cluster1<-which(cluster_no==1)
+cluster2<-which(cluster_no==2)
+cluster3<-which(cluster_no==3)
+#cluster4<-which(cluster_no==4)
+#cluster5<-which(cluster_no==4)
+
+
+plot(density(cluster1))
+lines(density(true),col="red")
+inter1<-intersect(cluster1,true)
+
+plot(density(cluster2))
+lines(density(true),col="blue")
+inter2<-intersect(cluster2,true)
+
+plot(density(cluster3))
+lines(density(true))
+inter3<-intersect(cluster3,true)
+```
+
